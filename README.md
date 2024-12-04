@@ -1,5 +1,5 @@
 
-# CareerCraft: ATS-Optimized Resume Analyzer using Gemini Model
+# AI-Powered ATS Resume Analyzer using Gemini Model
 
 ## Project Overview
 
