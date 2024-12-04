@@ -3,7 +3,7 @@
 
 ## Project Overview
 
-**CareerCraft** is an intelligent resume tracking system designed to analyze job applicants' resumes against specific job descriptions. Utilizing the power of the **Gemini 1.5 Flash model**, the system evaluates resumes, providing feedback on alignment with job requirements, strengths and weaknesses, and a percentage match score. This project aims to streamline the recruitment process for employers by leveraging advanced AI techniques.
+This model is an intelligent resume tracking system designed to analyze job applicants' resumes against specific job descriptions. Utilizing the power of the **Gemini 1.5 Flash model**, the system evaluates resumes, providing feedback on alignment with job requirements, strengths and weaknesses, and a percentage match score. This project aims to streamline the recruitment process for employers by leveraging advanced AI techniques.
 
 ### Key Features
 - Upload PDF resumes for analysis
