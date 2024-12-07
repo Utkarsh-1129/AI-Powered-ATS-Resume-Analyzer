@@ -83,12 +83,8 @@ CareerCraft-ATS-Optimized-Resume-Analyzer-using-Gemini-Model/
 └── README.md                 # Project documentation (this file)
 ```
 ## Output-Screenshot
+![image](https://github.com/user-attachments/assets/c6af68f0-bb26-4128-bd23-e80c6579194b)
 
-![image](https://github.com/user-attachments/assets/e20789f7-198e-41be-bd8c-6fcc6ab4d475)
-
-![image](https://github.com/user-attachments/assets/df430fcb-3cb2-4fde-ba1b-321e602ddc44)
-
-![image](https://github.com/user-attachments/assets/46cccb8e-826c-4a9f-98f2-0ecd7ab04d90)
 
 ## Contributing
 
