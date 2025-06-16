@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: ats-resume-analyzer
+    env: python
+    buildCommand: ""
+    startCommand: streamlit run app.py
