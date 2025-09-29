@@ -1,271 +1,206 @@
+from dotenv import load_dotenv
+import base64
 import streamlit as st
 import os
-import logging
+import io
+from PIL import Image
+import pdf2image
 import google.generativeai as genai
-import time
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Load environment variables
+load_dotenv()
+API_KEY = os.getenv("GOOGLE_API_KEY")
 
-class SecureATSClient:
-    """Secure ATS client without Pillow dependency"""
-    
-    def __init__(self):
-        # Use Streamlit secrets or environment variables
-        api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        
-        if not api_key:
-            st.error("""
-            🔐 API Key Not Found
-            
-            Please add your Google API key to:
-            - Streamlit Cloud: Settings → Secrets
-            - Local: .streamlit/secrets.toml file
-            - Environment variable: GOOGLE_API_KEY
-            """)
-            st.stop()
-        
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
-        self.last_request_time = 0
-        self.min_interval = 3
-        self.analysis_count = 0
-        self.max_analyses = 20
-    
-    def _rate_limit(self):
-        """Implement rate limiting"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_request_time
-        if time_since_last < self.min_interval:
-            time.sleep(self.min_interval - time_since_last)
-        self.last_request_time = time.time()
-    
-    def analyze_resume(self, job_description: str, resume_text: str, analysis_type: str) -> str:
-        """Analyze resume with usage limits"""
-        self.analysis_count += 1
-        if self.analysis_count > self.max_analyses:
-            raise Exception(f"Session limit reached. Maximum {self.max_analyses} analyses per session.")
-        
-        self._rate_limit()
-        
-        prompts = {
-            "summary": """
-            Provide a concise resume summary focusing on:
-            1. Technical skills match
-            2. Key strengths
-            3. Major gaps  
-            4. Overall impression
-            Keep response under 300 words.
-            """,
-            "percentage": """
-            Evaluate ATS compatibility and provide:
-            MATCH SCORE: XX%
-            MISSING KEYWORDS: [list]
-            STRENGTHS: [list]
-            QUICK ASSESSMENT: [brief]
-            Be concise and focused.
-            """,
-            "evaluation": """
-            Provide a comprehensive evaluation:
-            1. Role Alignment
-            2. Technical Fit  
-            3. Experience Relevance
-            4. Hiring Recommendation
-            5. Key Improvements
-            Provide honest, professional assessment.
-            """
-        }
-        
-        if analysis_type not in prompts:
-            raise ValueError(f"Invalid analysis type: {analysis_type}")
-        
-        try:
-            full_prompt = f"""
-            {prompts[analysis_type]}
-            
-            JOB DESCRIPTION:
-            {job_description}
-            
-            RESUME TEXT:
-            {resume_text}
-            
-            Please provide your analysis based on the above information.
-            """
-            
-            response = self.model.generate_content(full_prompt)
-            return response.text
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "quota" in error_msg:
-                raise Exception("API quota exceeded. Please try again later.")
-            elif "rate limit" in error_msg:
-                raise Exception("Rate limit reached. Please wait a moment.")
-            else:
-                raise Exception(f"Analysis error: {str(e)}")
+if not API_KEY:
+    st.error("⚠️ Google API key not found. Please set GOOGLE_API_KEY in your .env file.")
+else:
+    genai.configure(api_key=API_KEY)
 
-def main():
-    # Page configuration
-    st.set_page_config(
-        page_title="ATS Resume Analyzer",
-        page_icon="📊",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    # Custom CSS
-    st.markdown("""
-    <style>
-        .main {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-        .stApp {
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .stTextArea textarea {
-            background-color: #ffffff;
-            color: #333333;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            padding: 15px;
-            font-size: 14px;
-        }
-        .stButton>button {
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 20px;
-            padding: 15px 25px;
-            font-weight: 600;
-            font-size: 14px;
-            transition: all 0.3s ease;
-            width: 100%;
-            margin: 8px 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .stButton>button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        }
-        .analysis-section {
-            background-color: white;
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin: 15px 0;
-            border-left: 5px solid #667eea;
-        }
-        .usage-counter {
-            background: white;
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-            margin: 10px 0;
-            border: 2px solid #667eea;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Initialize client
+# ---------------------- Utility Functions ----------------------
+
+def get_gemini_response(system_prompt, pdf_content, job_desc):
+    """Send resume + job description to Gemini 2.5 Flash model with fallback."""
     try:
-        client = SecureATSClient()
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content([system_prompt, pdf_content[0], job_desc])
+        return response.text
     except Exception as e:
-        st.error(f"❌ Initialization failed: {str(e)}")
-        return
-    
-    # Sidebar
-    with st.sidebar:
-        st.title("🎯 ATS Analyzer")
-        
-        remaining = max(0, client.max_analyses - client.analysis_count)
-        st.markdown(f"""
-        <div class="usage-counter">
-            <h3>📊 Session Usage</h3>
-            <h2>{remaining} / {client.max_analyses}</h2>
-            <p>Analyses Remaining</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("### 💡 How To Use")
-        st.markdown("""
-        1. **Paste Job Description** in the main area
-        2. **Paste Your Resume** text in the resume area  
-        3. **Choose Analysis Type**
-        
-        *No file uploads required!*
-        """)
-    
-    # Main interface
-    st.title("🎯 ATS Resume Analyzer")
-    st.markdown("### Get AI-powered resume feedback in seconds!")
-    
-    # Input sections
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📝 Job Description")
-        job_description = st.text_area(
-            "Paste the job description:",
-            height=250,
-            placeholder="Copy and paste the complete job description here...",
-            label_visibility="collapsed"
-        )
-    
-    with col2:
-        st.subheader("📄 Resume Text")
-        resume_text = st.text_area(
-            "Paste your resume:",
-            height=250,
-            placeholder="Copy and paste your resume text here...\n\nYou can get this from:\n- LinkedIn profile\n- Word/Google Docs\n- Any text editor",
-            label_visibility="collapsed"
-        )
-    
-    # Analysis buttons
-    st.markdown("---")
-    st.subheader("🔍 Choose Analysis Type")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        summary_btn = st.button("📋 Quick Summary", use_container_width=True)
-    with col2:
-        percentage_btn = st.button("📊 ATS Score", use_container_width=True)
-    with col3:
-        evaluation_btn = st.button("⭐ Full Evaluation", use_container_width=True)
-    
-    # Handle analysis requests
-    if not job_description or not resume_text:
-        st.info("👆 Please enter both job description and resume text to get started.")
-    else:
-        try:
-            if summary_btn:
-                with st.spinner("🔍 Analyzing resume fit..."):
-                    response = client.analyze_resume(job_description, resume_text, "summary")
-                    st.markdown("### 📋 Quick Summary")
-                    st.markdown('<div class="analysis-section">', unsafe_allow_html=True)
-                    st.markdown(response)
-                    st.markdown('</div>', unsafe_allow_html=True)
-            
-            elif percentage_btn:
-                with st.spinner("📊 Calculating ATS compatibility..."):
-                    response = client.analyze_resume(job_description, resume_text, "percentage")
-                    st.markdown("### 📊 ATS Compatibility Score")
-                    st.markdown('<div class="analysis-section">', unsafe_allow_html=True)
-                    st.markdown(response)
-                    st.markdown('</div>', unsafe_allow_html=True)
-            
-            elif evaluation_btn:
-                with st.spinner("⭐ Conducting comprehensive evaluation..."):
-                    response = client.analyze_resume(job_description, resume_text, "evaluation")
-                    st.markdown("### ⭐ Complete Evaluation")
-                    st.markdown('<div class="analysis-section">', unsafe_allow_html=True)
-                    st.markdown(response)
-                    st.markdown('</div>', unsafe_allow_html=True)
-        
-        except Exception as e:
-            st.error(f"❌ {str(e)}")
+        # Fallback to Pro model if Flash 2.5 is unavailable
+        st.warning("⚠️ Falling back to gemini-2.0-pro due to: {}".format(e))
+        model = genai.GenerativeModel("gemini-2.0-pro")
+        response = model.generate_content([system_prompt, pdf_content[0], job_desc])
+        return response.text
 
-if __name__ == "__main__":
-    main()
+def input_pdf_setup(uploaded_file):
+    """Convert PDF into base64-encoded images for Gemini."""
+    if uploaded_file is None:
+        raise FileNotFoundError("No file uploaded")
+
+    images = pdf2image.convert_from_bytes(uploaded_file.read())
+    first_page = images[0]  # Only first page for efficiency
+
+    img_byte_arr = io.BytesIO()
+    first_page.save(img_byte_arr, format="JPEG")
+    img_byte_arr = img_byte_arr.getvalue()
+
+    pdf_parts = [
+        {
+            "mime_type": "image/jpeg",
+            "data": base64.b64encode(img_byte_arr).decode()
+        }
+    ]
+    return pdf_parts
+
+# ---------------------- Streamlit UI ----------------------
+
+st.set_page_config(page_title="AI Powered Resume Analyzer", page_icon="📄", layout="centered")
+
+# Custom CSS
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+    *{
+        
+    }
+    /* MAIN Styling */
+    body {
+        font-family: 'Inter', sans-serif;
+        background: linear-gradient(135deg, #f0f4f8, #d);
+    }
+
+    .stApp {
+            background: linear-gradient(135deg, #f0f4, #406078);
+
+
+    }
+
+    /* Header */
+    .stHeader {
+        font-weight: 600;
+        font-size: 1.5rem;
+        color: #1a202c;
+        text-align: center;
+        padding-bottom: 20px;
+    }
+
+    /* Button Styling */
+    .stButton>button {
+        background-color: #007BFF;
+        color: white;
+        font-weight: 500;
+        font-size: 16px;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+        text-align: center;
+        
+    }
+
+    .stButton>button:hover {
+        background-color: #132743;
+        color: yellow;
+        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    /* Input Fields */
+    .stTextInput > div > div > input,
+    .stTextArea textarea {
+        background-color: white;
+        color: #495057;
+        border: 1px solid #ced4da;
+        border-radius: 8px;
+        padding: 10px;
+        text-align: center;    
+    }
+
+    /* Columns and Sections */
+    [data-testid="stHorizontalBlock"] > div {
+        background: white;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    /* Subheader */
+    .stSubheader {
+        color: #1a202c;
+        font-weight: 1000;
+        margin-bottom: 15px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+st.header("AI-Powered Resume Analyzer")
+input_text = st.text_area("Job Description and Demands:", key="input")
+uploaded_file = st.file_uploader("Upload your resume here (PDF)...", type=["pdf"])
+
+if uploaded_file is not None:
+    st.success("PDF Uploaded Successfully")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    submit1 = st.button("Request Improvements")
+
+with col2:
+    submit2 = st.button("Percentage match")
+
+with col3:
+    submit3 = st.button("Evaluate Resume")
+
+
+#prompt to assign task to Gen AI
+input_prompt1 = """
+You are an experienced Technical Human Resource Manager, your task is to review the provided resume against the job description. 
+Please share your feedback on candidate exposure and Techical knowledge improvement according to the job requirement. 
+Highlight the flaws and weaknesses of the applicant.
+"""
+
+input_prompt2 = """
+You are a skilled ATS (Applicant Tracking System) scanner with a deep understanding of data science and ATS functionality, 
+your task is to strictly evaluate the resume against the provided job description. Give me the percentage of match if the resume matches
+the job description. First, the output should come as percentage and then keywords missing and last final  and don't show any leniency.
+"""
+input_prompt3 ="""
+You are an experienced Technical Human Resource Manager, your task is to review the provided resume against the job description. 
+Please share your professional evaluation on whether the candidate's profile aligns with the role. 
+Highlight the strengths and weaknesses of the applicant in relation to the specified job requirements.
+"""
+
+#submit actions
+if submit1:
+    if uploaded_file is not None:
+        pdf_content = input_pdf_setup(uploaded_file)
+        response = get_gemini_response(input_prompt1, pdf_content, input_text)
+        st.subheader("The Response is")
+        st.write(response)
+    else:
+        st.error("Please upload the resume")
+
+elif submit2:
+    if uploaded_file is not None:
+        pdf_content = input_pdf_setup(uploaded_file)
+        response = get_gemini_response(input_prompt2, pdf_content, input_text)
+        st.subheader("The Response is")
+        st.write(response)
+    else:
+        st.error("Please upload the resume")
+
+elif submit3:
+    if uploaded_file is not None:
+        pdf_content = input_pdf_setup(uploaded_file)
+        response1 = get_gemini_response(input_prompt1, pdf_content, input_text)
+        response2 = get_gemini_response(input_prompt2, pdf_content, input_text)
+
+        st.subheader("Evaluation Response:")
+        st.write(response1)
+
+        st.subheader("Percentage Match Response:")
+        st.write(response2)
+    else:
+        st.error("Please upload the resume.")
