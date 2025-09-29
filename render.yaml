@@ -7,4 +7,4 @@ services:
     startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
     envVars:
       - key: GOOGLE_API_KEY
-        value: your_google_api_key_here
+        value: AIzaSyC1PtKcuJlU2G6CJ77_9marnwdvInBxIvQ
