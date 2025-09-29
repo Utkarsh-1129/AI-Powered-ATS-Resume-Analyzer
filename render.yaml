@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ats-analyzer
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    envVars:
+      - key: GOOGLE_API_KEY
+        value: your_google_api_key_here
